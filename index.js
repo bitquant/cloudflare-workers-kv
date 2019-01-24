@@ -29,17 +29,16 @@ async function getWithRestApi(key) {
         }
     });
 
-    if (response.ok) {
-        return response.text();
+    if (!response.ok) {
+        return null;
     }
 
-    return null;
+    return response.text();
 }
 
 async function get(key) {
 
-    let value = (typeof self === 'undefined') ?
-        await getWithRestApi(key) : await self[NAMESPACE].get(key);
+    let value = await getKV(key);
 
     if (value === null || !value.startsWith(META_LABEL)) {
         return value;
@@ -50,9 +49,8 @@ async function get(key) {
 
     for (let i = 0; i < chunks; i++) {
         let chunkKey = `${key}${CHUNK_LABEL}${i}`;
-        let promise = (typeof self === 'undefined') ?
-            getWithRestApi(chunkKey) : self[NAMESPACE].get(chunkKey, 'arrayBuffer');
-        promiseList.push(promise)
+        let chunkPromise = getKV(chunkKey, 'arrayBuffer')
+        promiseList.push(chunkPromise)
     }
 
     let chunkList = await Promise.all(promiseList);
@@ -112,9 +110,7 @@ async function put(key, value) {
     let encoded = encoder.encode(value);
 
     if (encoded.length <= CHUNK_SIZE) {
-        let result = (typeof self === 'undefined') ?
-            putWithRestApi(key, value) : self[NAMESPACE].put(key, value);
-        return result;
+        return putKV(key, value);
     }
 
     let chunkList  = [];
@@ -130,23 +126,16 @@ async function put(key, value) {
     }
 
     let metaValue = `${META_LABEL}${chunkList.length}`;
-    let promiseList = [];
+    await putKV(key, metaValue);
+
     let chunkId = 0;
-
-    let keyPromise = (typeof self === 'undefined') ?
-        putWithRestApi(key, metaValue) : self[NAMESPACE].put(key, metaValue);
-    promiseList.push(keyPromise);
-
     for (let chunk of chunkList) {
         let chunkKey = `${key}${CHUNK_LABEL}${chunkId}`;
-        let result = (typeof self === 'undefined')
-            ? putWithRestApi(chunkKey, chunk.buffer)
-            : self[NAMESPACE].put(chunkKey, chunk.buffer);
-        promiseList.push(result);
+        await putKV(chunkKey, chunk.buffer);
         chunkId++;
     }
 
-    return Promise.all(promiseList).then(() => undefined);
+    return undefined;
 }
 
 async function delWithRestApi(key) {
@@ -161,7 +150,7 @@ async function delWithRestApi(key) {
 
     // Check if key not found
     if (response.status === 404) {
-        return undefined;
+        return false; // key does not exist
     }
 
     if (!response.ok) {
@@ -174,37 +163,58 @@ async function delWithRestApi(key) {
         throw new Error(`${NAMESPACE}:${key} not deleted, success: ${body.success}`);
     }
 
-    return undefined;
+    return true; // key deleted
+}
+
+async function delWithNameSpace(key) {
+
+    try {
+        await self[NAMESPACE].delete(key);
+        return true; // key deleted
+    }
+    catch (ex) {
+        if (ex.message.includes('404')) {
+            return false; // key does not exist
+        }
+        throw ex;
+    }
 }
 
 async function del(key) {
 
-    let value = (typeof self === 'undefined') ?
-        await getWithRestApi(key) : await self[NAMESPACE].get(key);
+    let value = await getKV(key);
 
-    if (value === null || !value.startsWith(META_LABEL)) {
-        if (typeof self === 'undefined') {
-            return delWithRestApi(key)
-        }
-        return self[NAMESPACE].delete(key);
+    if (value === null) {
+        return false;
+    }
+
+    if (!value.startsWith(META_LABEL)) {
+        return delKV(key);
     }
 
     let chunks = parseInt(value.slice(META_LABEL.length), 10);
-    let promiseList = [];
 
     for (let i = 0; i < chunks; i++) {
         let chunkKey = `${key}${CHUNK_LABEL}${i}`;
-        let promise = (typeof self === 'undefined') ?
-            delWithRestApi(chunkKey) : self[NAMESPACE].delete(chunkKey);
-        promiseList.push(promise)
+        await delKV(chunkKey);
     }
 
-    let chunkList = await Promise.all(promiseList);
+    return delKV(key);
+}
 
-    if (typeof self === 'undefined') {
-        return delWithRestApi(key)
-    }
-    return self[NAMESPACE].delete(key);
+var getKV;
+var putKV;
+var delKV;
+
+if (typeof self === 'undefined') {
+    getKV = getWithRestApi;
+    putKV = putWithRestApi;
+    delKV = delWithRestApi;
+}
+else {
+    getKV = (key, type) => self[NAMESPACE].get(key, type);
+    putKV = (key, value) => self[NAMESPACE].put(key, value);
+    delKV = delWithNameSpace;
 }
 
 exports.init = init;

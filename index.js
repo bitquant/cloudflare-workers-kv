@@ -1,12 +1,13 @@
+var uuidv4 = require('uuid/v4');
+
 var ACCOUNT_ID = null;
 var EMAIL = null;
 var API_KEY = null;
 var NAMESPACE = null;
 
 var BASE_PATH = 'https://api.cloudflare.com/client/v4/accounts'
-var CHUNK_SIZE = 64000 // KV max size
-var CHUNK_LABEL = '___CHUNK___'
-var META_LABEL = '___META___'
+var BLOCK_SIZE = 64000 // KV max size
+var BLOCK_REGEX = /^id=[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12};length=[0-9]{1,}$/
 
 
 async function init(namespace, account, email, apiKey) {
@@ -36,42 +37,61 @@ async function getWithRestApi(key) {
     return response.text();
 }
 
+function parseBlockMeta(value) {
+    let blockId = value.slice(3, 39);
+    let blockCount = parseInt(value.slice(47), 10);
+    return { blockId, blockCount };
+}
+
+function getBlockMeta(blockId, blockCount) {
+    return `id=${blockId};length=${blockCount}`;
+}
+
+function getBlockKey(blockId, blockIndex) {
+    return `id=${blockId};index=${blockIndex}`;
+}
+
 async function get(key) {
 
     let value = await getKV(key);
 
-    if (value === null || !value.startsWith(META_LABEL)) {
+    if (value === null || value.search(BLOCK_REGEX) === -1) {
         return value;
     }
 
-    let chunks = parseInt(value.slice(META_LABEL.length), 10);
+    let { blockId, blockCount } = parseBlockMeta(value);
     let promiseList = [];
 
-    for (let i = 0; i < chunks; i++) {
-        let chunkKey = `${key}${CHUNK_LABEL}${i}`;
-        let chunkPromise = getKV(chunkKey, 'arrayBuffer')
-        promiseList.push(chunkPromise)
+    for (let blockIndex = 0; blockIndex < blockCount; blockIndex++) {
+        let blockKey = getBlockKey(blockId, blockIndex);
+        let blockPromise = getKV(blockKey, 'arrayBuffer')
+        promiseList.push(blockPromise)
     }
 
-    let chunkList = await Promise.all(promiseList);
+    let blockList = await Promise.all(promiseList);
     let finalValue = '';
     let byteArraySize = 0;
 
-    for (let chunkData of chunkList) {
-        if (chunkData instanceof ArrayBuffer) {
-            byteArraySize += chunkData.byteLength;
+    for (let blockData of blockList) {
+        if (blockData === null) {
+            let err = new Error(`key '${key}' has missing data blocks and needs deletion`);
+            err.blockRecord = value;
+            throw err;
+        }
+        if (blockData instanceof ArrayBuffer) {
+            byteArraySize += blockData.byteLength;
         }
         else {
-            finalValue += chunkData;
+            finalValue += blockData;
         }
     }
 
     if (byteArraySize > 0) {
         let resultArray = new Uint8Array(byteArraySize);
         let offset = 0;
-        for (let chunkData of chunkList) {
-            resultArray.set(new Uint8Array(chunkData), offset);
-            offset += chunkData.byteLength;
+        for (let blockData of blockList) {
+            resultArray.set(new Uint8Array(blockData), offset);
+            offset += blockData.byteLength;
         }
         let decoder = new TextDecoder();
         finalValue = decoder.decode(resultArray);
@@ -106,36 +126,51 @@ async function putWithRestApi(key, value) {
 
 async function put(key, value) {
 
+    let oldValue = await getKV(key);
+    let oldBlock = undefined;
+
+    if (oldValue !== null && oldValue.search(BLOCK_REGEX) === 0) {
+        oldBlock = oldValue;
+    }
+
     let encoder = new TextEncoder();
     let encoded = encoder.encode(value);
 
-    if (encoded.length <= CHUNK_SIZE) {
-        return putKV(key, value);
+    if (encoded.length <= BLOCK_SIZE) {
+        await putKV(key, value);
+        return oldBlock;
     }
 
-    let chunkList  = [];
-    let chunks = Math.floor(encoded.length / CHUNK_SIZE);
-    let lastChunk = (encoded.length % CHUNK_SIZE) > 0 ? 1 : 0;
-    let totalChunks = chunks + lastChunk;
+    let blockList  = [];
+    let blocks = Math.floor(encoded.length / BLOCK_SIZE);
+    let lastBlock = (encoded.length % BLOCK_SIZE) > 0 ? 1 : 0;
+    let totalBlocks = blocks + lastBlock;
 
-    for (let i = 0; i < totalChunks; i++) {
-        let chunkStartIndex = i * CHUNK_SIZE;
-        let chunkEndIndex = chunkStartIndex + CHUNK_SIZE;
-        let chunk = encoded.slice(chunkStartIndex, chunkEndIndex);
-        chunkList.push(chunk);
+    for (let i = 0; i < totalBlocks; i++) {
+        let startIndex = i * BLOCK_SIZE;
+        let endIndex = startIndex + BLOCK_SIZE;
+        let block = encoded.slice(startIndex, endIndex);
+        blockList.push(block);
     }
 
-    let metaValue = `${META_LABEL}${chunkList.length}`;
-    await putKV(key, metaValue);
+    let blockId = uuidv4();
+    let blockIndex = 0;
 
-    let chunkId = 0;
-    for (let chunk of chunkList) {
-        let chunkKey = `${key}${CHUNK_LABEL}${chunkId}`;
-        await putKV(chunkKey, chunk.buffer);
-        chunkId++;
+    for (let block of blockList) {
+        let blockKey = getBlockKey(blockId, blockIndex);
+        try {
+            await putKV(blockKey, block.buffer);
+        }
+        catch (ex) {
+            throw new Error(`${blockKey} block put error: ${ex.message}`)
+        }
+        blockIndex++;
     }
 
-    return undefined;
+    let blockMeta = getBlockMeta(blockId, blockList.length)
+    await putKV(key, blockMeta);
+
+    return oldBlock;
 }
 
 async function delWithRestApi(key) {
@@ -188,18 +223,28 @@ async function del(key) {
         return false;
     }
 
-    if (!value.startsWith(META_LABEL)) {
+    if (value.search(BLOCK_REGEX) === -1) {
         return delKV(key);
     }
 
-    let chunks = parseInt(value.slice(META_LABEL.length), 10);
+    let { blockId, blockCount } = parseBlockMeta(value);
 
-    for (let i = 0; i < chunks; i++) {
-        let chunkKey = `${key}${CHUNK_LABEL}${i}`;
-        await delKV(chunkKey);
+    for (let blockIndex = 0; blockIndex < blockCount; blockIndex++) {
+        let blockKey = getBlockKey(blockId, blockIndex);
+        await delKV(blockKey);
     }
 
     return delKV(key);
+}
+
+async function clean(block) {
+
+    let { blockId, blockCount } = parseBlockMeta(block);
+
+    for (let blockIndex = 0; blockIndex < blockCount; blockIndex++) {
+        let blockKey = getBlockKey(blockId, blockIndex);
+        await delKV(blockKey);
+    }
 }
 
 var getKV;
@@ -221,3 +266,4 @@ exports.init = init;
 exports.get = get;
 exports.put = put;
 exports.del = del;
+exports.clean = clean;

@@ -1,6 +1,6 @@
 {
   "name": "cloudflare-workers-kv",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -15,5 +15,8 @@
   "bugs": {
     "url": "https://github.com/bitquant/cloudflare-workers-kv/issues"
   },
-  "homepage": "https://github.com/bitquant/cloudflare-workers-kv#readme"
+  "homepage": "https://github.com/bitquant/cloudflare-workers-kv#readme",
+  "dependencies": {
+    "uuid": "3.3.2"
+  }
 }

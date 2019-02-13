@@ -3,27 +3,26 @@ var uuidv4 = require('uuid/v4');
 var ACCOUNT_ID = null;
 var EMAIL = null;
 var API_KEY = null;
-var NAMESPACE = null;
+var NAMESPACE_ID = null;
+var BINDING = null;
 
 var BASE_PATH = 'https://api.cloudflare.com/client/v4/accounts'
 var BLOCK_SIZE = 64000 // KV max size
 var BLOCK_REGEX = /^id=[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12};length=[0-9]{1,}$/
 
 
-async function init(namespace, account, email, apiKey) {
+async function init(config) {
 
-    // NAMESPACE is the variable binding name when running in Cloudflare
-    // NAMESPACE is the namespace ID when running locally
-
-    NAMESPACE = namespace;
-    ACCOUNT_ID = account;
-    EMAIL = email;
-    API_KEY = apiKey;
+    BINDING = config.variableBinding;
+    NAMESPACE_ID = config.namespaceId;
+    ACCOUNT_ID = config.accountId;
+    EMAIL = config.email;
+    API_KEY = config.apiKey;
 }
 
 async function getWithRestApi(key) {
 
-    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE}/values/${key}`, {
+    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${key}`, {
         headers: {
             'X-Auth-Email':  EMAIL,
             'X-Auth-Key': API_KEY
@@ -102,7 +101,7 @@ async function get(key) {
 
 async function putWithRestApi(key, value) {
 
-    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE}/values/${key}`, {
+    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${key}`, {
         headers: {
             'X-Auth-Email': EMAIL,
             'X-Auth-Key': API_KEY
@@ -112,13 +111,13 @@ async function putWithRestApi(key, value) {
     });
 
     if (!response.ok) {
-        throw new Error(`${NAMESPACE}:${key} not set to ${value} status: ${response.status}`);
+        throw new Error(`${NAMESPACE_ID}:${key} not set to ${value} status: ${response.status}`);
     }
 
     let body = await response.json();
 
     if (body.success !== true) {
-        throw new Error(`${NAMESPACE}:${key} not set to ${value} success: ${body.success}`);
+        throw new Error(`${NAMESPACE_ID}:${key} not set to ${value} success: ${body.success}`);
     }
 
     return undefined;
@@ -175,7 +174,7 @@ async function put(key, value) {
 
 async function delWithRestApi(key) {
 
-    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE}/values/${key}`, {
+    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${key}`, {
         headers: {
             'X-Auth-Email': EMAIL,
             'X-Auth-Key': API_KEY
@@ -189,13 +188,13 @@ async function delWithRestApi(key) {
     }
 
     if (!response.ok) {
-        throw new Error(`${NAMESPACE}:${key} not deleted, status: ${response.status}`);
+        throw new Error(`${NAMESPACE_ID}:${key} not deleted, status: ${response.status}`);
     }
 
     let body = await response.json();
 
     if (body.success !== true) {
-        throw new Error(`${NAMESPACE}:${key} not deleted, success: ${body.success}`);
+        throw new Error(`${NAMESPACE_ID}:${key} not deleted, success: ${body.success}`);
     }
 
     return true; // key deleted
@@ -204,7 +203,7 @@ async function delWithRestApi(key) {
 async function delWithNameSpace(key) {
 
     try {
-        await self[NAMESPACE].delete(key);
+        await self[BINDING].delete(key);
         return true; // key deleted
     }
     catch (ex) {
@@ -247,20 +246,10 @@ async function clean(block) {
     }
 }
 
-var getKV;
-var putKV;
-var delKV;
+var getKV = (typeof self === 'undefined') ? getWithRestApi : (key, type) => self[BINDING].get(key, type);
+var putKV = (typeof self === 'undefined') ? putWithRestApi : (key, value) => self[BINDING].put(key, value);
+var delKV = (typeof self === 'undefined') ? delWithRestApi : delWithNameSpace;
 
-if (typeof self === 'undefined') {
-    getKV = getWithRestApi;
-    putKV = putWithRestApi;
-    delKV = delWithRestApi;
-}
-else {
-    getKV = (key, type) => self[NAMESPACE].get(key, type);
-    putKV = (key, value) => self[NAMESPACE].put(key, value);
-    delKV = delWithNameSpace;
-}
 
 exports.init = init;
 exports.get = get;

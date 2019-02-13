@@ -11,23 +11,30 @@ $ npm install cloudflare-workers-kv --save
 ```javascript
 var kv = require('cloudflare-workers-kv');
 
-kv.init({
-    variableBinding: '<variable name>',
-    namespaceId: '<namespace id>',
-    accountId: '<account id>',
-    email: '<email>',
-    apiKey: '<API key>'
-});
+// These dependencies are needed when running in Node
+global.fetch = require('node-fetch');
+var util = require('util');
+global.TextEncoder = util.TextEncoder;
+global.TextDecoder = util.TextDecoder;
 
+(async () => {
+    kv.init({
+        variableBinding: '<variable name>',
+        namespaceId: '<namespace id>',
+        accountId: '<account id>',
+        email: '<email>',
+        apiKey: '<API key>'
+    });
 
-// Write to the KV store
-await kv.put('test-kv-key', 'test-key-value');
+    // Write to the KV store
+    await kv.put('test-kv-key', 'test-key-value');
 
-// Read from the KV store
-var data = await kv.get('test-kv-key');
+    // Read from the KV store
+    var data = await kv.get('test-kv-key');
 
-// Delete from the KV store
-await kv.del('test-kv-key');
+    // Delete from the KV store
+    await kv.del('test-kv-key');
+})();
 
 ```
 

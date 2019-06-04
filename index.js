@@ -7,7 +7,7 @@ var NAMESPACE_ID = null;
 var BINDING = null;
 
 var BASE_PATH = 'https://api.cloudflare.com/client/v4/accounts'
-var BLOCK_SIZE = 64000 // KV max size
+var BLOCK_SIZE = 2000000 // KV max size
 var BLOCK_REGEX = /^id=[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12};length=[0-9]{1,}$/
 
 

@@ -246,9 +246,40 @@ async function clean(block) {
     }
 }
 
+async function putMultiWithRestApi(keyValuePairs) {
+
+    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/bulk`, {
+        headers: {
+            'X-Auth-Email': EMAIL,
+            'X-Auth-Key': API_KEY,
+            'Content-Type': 'application/json'
+        },
+        method: 'PUT',
+        body: JSON.stringify(keyValuePairs)
+    });
+
+    if (!response.ok) {
+        throw new Error(`${NAMESPACE_ID}:multiple keys not set status: ${response.status}`);
+    }
+
+    let body = await response.json();
+
+    if (body.success !== true) {
+        throw new Error(`${NAMESPACE_ID}:multiple keys not set success: ${body.success}`);
+    }
+
+    return undefined;
+}
+
+async function putMulti(keyValuePairs) {
+
+    return putMultiKV(keyValuePairs);
+}
+
 var getKV = (typeof self === 'undefined') ? getWithRestApi : (key, type) => self[BINDING].get(key, type);
 var putKV = (typeof self === 'undefined') ? putWithRestApi : (key, value) => self[BINDING].put(key, value);
 var delKV = (typeof self === 'undefined') ? delWithRestApi : delWithNameSpace;
+var putMultiKV = putMultiWithRestApi;
 
 
 exports.init = init;
@@ -256,3 +287,4 @@ exports.get = get;
 exports.put = put;
 exports.del = del;
 exports.clean = clean;
+exports.putMulti = putMulti;

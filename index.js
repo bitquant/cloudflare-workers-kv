@@ -276,10 +276,59 @@ async function putMulti(keyValuePairs) {
     return putMultiKV(keyValuePairs);
 }
 
+async function listWithRestApi(params) {
+
+    let query = '';
+
+    if (params !== undefined) {
+
+        if (params.cursor !== undefined) {
+            query += `?cursor=${params.cursor}`
+        }
+
+        if (params.prefix !== undefined) {
+            query += `${query.length > 0 ? '&' : '?'}prefix=${params.prefix}`
+        }
+
+        if (params.limit !== undefined) {
+            query += `${query.length > 0 ? '&' : '?'}limit=${params.limit}`
+        }
+    }
+
+    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/keys${query}`, {
+        headers: {
+            'X-Auth-Email': EMAIL,
+            'X-Auth-Key': API_KEY
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error(`${NAMESPACE_ID}: unable to list keys status: ${response.status}`);
+    }
+
+    let body = await response.json();
+
+    if (body.success !== true) {
+        throw new Error(`${NAMESPACE_ID}: list keys not successful`);
+    }
+
+    return {
+        count: body.result_info.count,
+        cursor: body.result_info.cursor,
+        keys: body.result
+    };
+}
+
+async function list(params) {
+
+    return listKV(params)
+}
+
 var getKV = (typeof self === 'undefined') ? getWithRestApi : (key, type) => self[BINDING].get(key, type);
 var putKV = (typeof self === 'undefined') ? putWithRestApi : (key, value) => self[BINDING].put(key, value);
 var delKV = (typeof self === 'undefined') ? delWithRestApi : delWithNameSpace;
 var putMultiKV = putMultiWithRestApi;
+var listKV = listWithRestApi;
 
 
 exports.init = init;
@@ -288,3 +337,4 @@ exports.put = put;
 exports.del = del;
 exports.clean = clean;
 exports.putMulti = putMulti;
+exports.list = list;

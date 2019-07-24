@@ -29,6 +29,9 @@ global.TextDecoder = util.TextDecoder;
     // Write to the KV store
     await kv.put('test-kv-key', 'test-key-value');
 
+    // Write to the KV store with an expiration
+    await kv.put('test-kv-key-exp', 'test-key-value', { expirationTtl: 60 });
+
     // Read from the KV store
     var data = await kv.get('test-kv-key');
 
@@ -39,8 +42,14 @@ global.TextDecoder = util.TextDecoder;
     await kv.putMulti([
         { key: 'key-abc', value: 'value-abc' },
         { key: 'key-xyz', value: 'value-xyz' },
-        { key: 'key-123', value: 'value-123' }
+        { key: 'key-123', value: 'value-123', expirationTtl: 60 }
     ])
+
+    // List all keys
+    await kv.list();
+
+    // List keys with cursor, prefix and result limit
+    await kv.list({prefix: "abc", limit: 75, cursor: "2d840f03-df70-4d93-afe4-5f83856f6214"})
 })();
 
 ```

@@ -99,9 +99,20 @@ async function get(key) {
     return finalValue;
 }
 
-async function putWithRestApi(key, value) {
+async function putWithRestApi(key, value, params) {
 
-    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${key}`, {
+    let query = '';
+
+    if (params !== undefined) {
+        if (params.expiration !== undefined) {
+            query += `?expiration=${params.expiration}`
+        }
+        if (params.expirationTtl !== undefined) {
+            query += `${query.length > 0 ? '&' : '?'}expiration_ttl=${params.expirationTtl}`
+        }
+    }
+
+    const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${key}${query}`, {
         headers: {
             'X-Auth-Email': EMAIL,
             'X-Auth-Key': API_KEY
@@ -123,7 +134,7 @@ async function putWithRestApi(key, value) {
     return undefined;
 }
 
-async function put(key, value) {
+async function put(key, value, params) {
 
     let oldValue = await getKV(key);
     let oldBlock = undefined;
@@ -136,7 +147,7 @@ async function put(key, value) {
     let encoded = encoder.encode(value);
 
     if (encoded.length <= BLOCK_SIZE) {
-        await putKV(key, value);
+        await putKV(key, value, params);
         return oldBlock;
     }
 
@@ -155,10 +166,21 @@ async function put(key, value) {
     let blockId = uuidv4();
     let blockIndex = 0;
 
+    if (params !== undefined) {
+        // Blocks need to expire after the header block expires so +600s
+        var blockParams = Object.assign({}, params);
+        if (params.expiration !== undefined) {
+            blockParams.expiration += 600;
+        }
+        if (params.expirationTtl !== undefined) {
+            blockParams.expirationTtl += 600;
+        }
+    }
+
     for (let block of blockList) {
         let blockKey = getBlockKey(blockId, blockIndex);
         try {
-            await putKV(blockKey, block.buffer);
+            await putKV(blockKey, block.buffer, blockParams);
         }
         catch (ex) {
             throw new Error(`${blockKey} block put error: ${ex.message}`)
@@ -167,7 +189,7 @@ async function put(key, value) {
     }
 
     let blockMeta = getBlockMeta(blockId, blockList.length)
-    await putKV(key, blockMeta);
+    await putKV(key, blockMeta, params);
 
     return oldBlock;
 }
@@ -248,6 +270,14 @@ async function clean(block) {
 
 async function putMultiWithRestApi(keyValuePairs) {
 
+    keyValuePairs.map(function(kv) {
+        if (kv.expirationTtl !== undefined) {
+            kv.expiration_ttl = kv.expirationTtl;
+            delete kv.expirationTtl;
+        }
+        return kv;
+    })
+
     const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/bulk`, {
         headers: {
             'X-Auth-Email': EMAIL,
@@ -325,7 +355,7 @@ async function list(params) {
 }
 
 var getKV = (typeof self === 'undefined') ? getWithRestApi : (key, type) => self[BINDING].get(key, type);
-var putKV = (typeof self === 'undefined') ? putWithRestApi : (key, value) => self[BINDING].put(key, value);
+var putKV = (typeof self === 'undefined') ? putWithRestApi : (key, value, params) => self[BINDING].put(key, value, params);
 var delKV = (typeof self === 'undefined') ? delWithRestApi : delWithNameSpace;
 var putMultiKV = putMultiWithRestApi;
 var listKV = listWithRestApi;

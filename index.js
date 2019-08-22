@@ -20,7 +20,7 @@ async function init(config) {
     API_KEY = config.apiKey;
 }
 
-async function getWithRestApi(key) {
+async function getWithRestApi(key, type) {
 
     const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${key}`, {
         headers: {
@@ -33,7 +33,21 @@ async function getWithRestApi(key) {
         return null;
     }
 
-    return response.text();
+    if (type === 'text' || type === undefined) {
+        return response.text();
+    }
+    else if (type === 'json') {
+        return response.json();
+    }
+    else if (type === 'arrayBuffer') {
+        return response.arrayBuffer();
+    }
+    else if (type === 'stream') {
+        return response.body;
+    }
+    else {
+        throw new Error(`error getting value for key ${key}, unsupported type: ${type}`)
+    }
 }
 
 function parseBlockMeta(value) {
@@ -50,12 +64,17 @@ function getBlockKey(blockId, blockIndex) {
     return `id=${blockId};index=${blockIndex}`;
 }
 
-async function get(key) {
+async function get(key, type) {
 
-    let value = await getKV(key);
+    let value = await getKV(key, 'text');
 
     if (value === null || value.search(BLOCK_REGEX) === -1) {
-        return value;
+        if (type === 'text' || type === undefined) {
+            return value;
+        }
+        else {
+            return getKV(key, type);
+        }
     }
 
     let { blockId, blockCount } = parseBlockMeta(value);
@@ -68,7 +87,6 @@ async function get(key) {
     }
 
     let blockList = await Promise.all(promiseList);
-    let finalValue = '';
     let byteArraySize = 0;
 
     for (let blockData of blockList) {
@@ -77,23 +95,29 @@ async function get(key) {
             err.blockRecord = value;
             throw err;
         }
-        if (blockData instanceof ArrayBuffer) {
-            byteArraySize += blockData.byteLength;
-        }
-        else {
-            finalValue += blockData;
-        }
+        byteArraySize += blockData.byteLength;
     }
 
-    if (byteArraySize > 0) {
-        let resultArray = new Uint8Array(byteArraySize);
-        let offset = 0;
-        for (let blockData of blockList) {
-            resultArray.set(new Uint8Array(blockData), offset);
-            offset += blockData.byteLength;
+    let resultArray = new Uint8Array(byteArraySize);
+    let offset = 0;
+    for (let blockData of blockList) {
+        resultArray.set(new Uint8Array(blockData), offset);
+        offset += blockData.byteLength;
+    }
+
+    let finalValue;
+
+    if (type === 'text' || type === undefined || type === 'json') {
+        finalValue = new TextDecoder().decode(resultArray);
+        if (type === 'json') {
+            finalValue = JSON.parse(finalValue)
         }
-        let decoder = new TextDecoder();
-        finalValue = decoder.decode(resultArray);
+    }
+    else if (type === 'arrayBuffer') {
+        finalValue = resultArray.buffer;
+    }
+    else {  // stream type not supported for large values
+        throw new Error(`error getting large value for key ${key}, unsupported type: ${type}`)
     }
 
     return finalValue;
@@ -136,15 +160,27 @@ async function putWithRestApi(key, value, params) {
 
 async function put(key, value, params) {
 
-    let oldValue = await getKV(key);
+    let oldValue = await getKV(key, 'text');
     let oldBlock = undefined;
 
     if (oldValue !== null && oldValue.search(BLOCK_REGEX) === 0) {
         oldBlock = oldValue;
     }
 
-    let encoder = new TextEncoder();
-    let encoded = encoder.encode(value);
+    let encoded = null;
+
+    if (typeof value === 'string') {
+        encoded = new TextEncoder().encode(value);
+    }
+    else if (value instanceof ArrayBuffer) {
+        encoded = new Uint8Array(value)
+    }
+    else if (value.buffer instanceof ArrayBuffer) { // ArrayBufferView
+        encoded = new Uint8Array(value.buffer)
+    }
+    else {
+        throw new Error(`unable to put unsupported value type ${typeof value}`)
+    }
 
     if (encoded.length <= BLOCK_SIZE) {
         await putKV(key, value, params);

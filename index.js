@@ -66,18 +66,33 @@ function getBlockKey(blockId, blockIndex) {
 
 async function get(key, type) {
 
-    let value = await getKV(key, 'text');
+    let arrayBuffer = await getKV(key, 'arrayBuffer');
 
-    if (value === null || value.search(BLOCK_REGEX) === -1) {
-        if (type === 'text' || type === undefined) {
-            return value;
-        }
-        else {
-            return getKV(key, type);
-        }
+    if (arrayBuffer === null) {
+        return null;
     }
 
-    let { blockId, blockCount } = parseBlockMeta(value);
+    let stringValue = new TextDecoder().decode(arrayBuffer);
+
+    if (stringValue.search(BLOCK_REGEX) === -1) {
+
+        if (type === 'text' || type === undefined) {
+            return stringValue;
+        }
+        if (type === 'json') {
+            return JSON.parse(stringValue)
+        }
+        if (type === 'arrayBuffer') {
+            return arrayBuffer;
+        }
+        if (type === 'stream') {
+            return new Response(arrayBuffer).body;
+        }
+
+        throw new Error(`error getting value for key ${key}, unsupported type: ${type}`)
+    }
+
+    let { blockId, blockCount } = parseBlockMeta(stringValue);
     let promiseList = [];
 
     for (let blockIndex = 0; blockIndex < blockCount; blockIndex++) {
@@ -92,7 +107,7 @@ async function get(key, type) {
     for (let blockData of blockList) {
         if (blockData === null) {
             let err = new Error(`key '${key}' has missing data blocks and needs deletion`);
-            err.blockRecord = value;
+            err.blockRecord = stringValue;
             throw err;
         }
         byteArraySize += blockData.byteLength;
@@ -116,7 +131,10 @@ async function get(key, type) {
     else if (type === 'arrayBuffer') {
         finalValue = resultArray.buffer;
     }
-    else {  // stream type not supported for large values
+    else if (type === 'stream') {
+        finalValue = new Response(resultArray.buffer).body;
+    }
+    else {
         throw new Error(`error getting large value for key ${key}, unsupported type: ${type}`)
     }
 
@@ -179,11 +197,11 @@ async function put(key, value, params) {
         encoded = new Uint8Array(value.buffer)
     }
     else {
-        throw new Error(`unable to put unsupported value type ${typeof value}`)
+        encoded = new Uint8Array(await new Response(value).arrayBuffer())
     }
 
     if (encoded.length <= BLOCK_SIZE) {
-        await putKV(key, value, params);
+        await putKV(key, encoded, params);
         return oldBlock;
     }
 

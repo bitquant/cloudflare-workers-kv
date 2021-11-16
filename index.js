@@ -3,6 +3,7 @@ var uuidv4 = require('uuid/v4');
 var ACCOUNT_ID = null;
 var EMAIL = null;
 var API_KEY = null;
+var API_TOKEN = null;
 var NAMESPACE_ID = null;
 var BINDING = null;
 
@@ -11,22 +12,26 @@ var BLOCK_SIZE = 25000000 // KV max size
 var BLOCK_REGEX = /^id=[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12};length=[0-9]{1,}$/
 
 
-async function init(config) {
-
-    BINDING = config.variableBinding;
-    NAMESPACE_ID = config.namespaceId;
-    ACCOUNT_ID = config.accountId;
-    EMAIL = config.email;
-    API_KEY = config.apiKey;
+async function init({
+    variableBinding,
+    namespaceId,
+    accountId,
+    email,
+    apiKey,
+    apiToken
+}) {
+    BINDING = variableBinding;
+    NAMESPACE_ID = namespaceId;
+    ACCOUNT_ID = accountId;
+    EMAIL = email ?? null;
+    API_KEY = apiKey ?? null;
+    API_TOKEN = apiToken ?? null;
 }
 
 async function getWithRestApi(key, type) {
 
     const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${key}`, {
-        headers: {
-            'X-Auth-Email':  EMAIL,
-            'X-Auth-Key': API_KEY
-        }
+        headers: getHeaders()
     });
 
     if (!response.ok) {
@@ -155,10 +160,7 @@ async function putWithRestApi(key, value, params) {
     }
 
     const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${key}${query}`, {
-        headers: {
-            'X-Auth-Email': EMAIL,
-            'X-Auth-Key': API_KEY
-        },
+        headers: getHeaders(),
         method: 'PUT',
         body: value
     });
@@ -251,10 +253,7 @@ async function put(key, value, params) {
 async function delWithRestApi(key) {
 
     const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${key}`, {
-        headers: {
-            'X-Auth-Email': EMAIL,
-            'X-Auth-Key': API_KEY
-        },
+        headers: getHeaders(),
         method: 'DELETE'
     });
 
@@ -334,8 +333,7 @@ async function putMultiWithRestApi(keyValuePairs) {
 
     const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/bulk`, {
         headers: {
-            'X-Auth-Email': EMAIL,
-            'X-Auth-Key': API_KEY,
+            ...getHeaders(),
             'Content-Type': 'application/json'
         },
         method: 'PUT',
@@ -380,10 +378,7 @@ async function listWithRestApi(params) {
     }
 
     const response = await fetch(`${BASE_PATH}/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/keys${query}`, {
-        headers: {
-            'X-Auth-Email': EMAIL,
-            'X-Auth-Key': API_KEY
-        }
+        headers: getHeaders()
     });
 
     if (!response.ok) {
@@ -406,6 +401,21 @@ async function listWithRestApi(params) {
 async function list(params) {
 
     return listKV(params)
+}
+
+function getHeaders() {
+    if (API_KEY != null && EMAIL != null) {
+        return {
+            'X-Auth-Email': EMAIL,
+            'X-Auth-Key': API_KEY
+        }
+    }
+    if (API_TOKEN != null) {
+        return {
+            'Authorization': 'Bearer ' + API_TOKEN
+        }
+    }
+    throw new Error("Missing authentication parameters (Email, ApiKey) or (ApiToken)")
 }
 
 var getKV = (typeof self === 'undefined') ? getWithRestApi : (key, type) => self[BINDING].get(key, type);

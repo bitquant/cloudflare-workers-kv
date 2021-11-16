@@ -54,6 +54,16 @@ global.TextDecoder = util.TextDecoder;
 
 ```
 
+To use with Api Token
+```javascript
+kv.init({
+    variableBinding: '<variable name>',
+    namespaceId: '<namespace id>',
+    accountId: '<account id>',
+    apiToken: '<API key>'
+});
+```
+
 ## Multi Environment Support
 The library can be used within a worker running in Cloudflare as well as within any local test environment.  When running in a local test environment the library uses the Cloudflare KV rest API.  
 

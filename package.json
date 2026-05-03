@@ -17,6 +17,6 @@
   },
   "homepage": "https://github.com/bitquant/cloudflare-workers-kv#readme",
   "dependencies": {
-    "uuid": "3.3.3"
+    "uuid": "14.0.0"
   }
 }
